@@ -38,7 +38,7 @@ def load_data():
         print "The file \"dataList\" has been located correctly."
 
 
-        f = open("dataList",'r')
+        f = open("dataList_New",'r')
         for line in f:
             if line.startswith("["):
                 temp = line.replace(" ", '').replace('[','').replace(']','').replace('\r','').replace('\n','').split(",")
@@ -94,7 +94,7 @@ def load_data():
     return DATA_LIST, Index, Status, Geometry, Post, Cost, Directory 
 
 ##############################
-def EXECUTE(Geometry_list,Case_directory):
+def EXECUTE(Geometry_list,Case_directory,neareast_DIR):
 
     
     #############################
@@ -159,10 +159,11 @@ def EXECUTE(Geometry_list,Case_directory):
         #############################
         # 这一步是将初始化的文档拷贝过去
 
-        os.system("cp -r ../Initial_Value/. ./0/.")
+        os.system("cp -r " + neareast_DIR +"/100000/. ./0/.")
+        os.system("rm -r ./0/uniform")
         os.system("decomposePar")
         #os.system("paraFoam")
-
+ 
         # excute with 4 cores
         os.system("mpirun -np 4 transonicMRFDyMFoam -parallel")
 
@@ -184,8 +185,8 @@ def EXECUTE(Geometry_list,Case_directory):
 
         #############################
         #将最后一步结果拷贝到Initial_value中，方便下一个算例的初始化
-        os.system("cp -r ./15000/.  ../Initial_Value/." )
-        os.system("rm -r ../Initial_value/uniform")
+        #os.system("cp -r ./15000/.  ../Initial_Value/." )
+        #os.system("rm -r ../Initial_value/uniform")
         
 
 
@@ -394,7 +395,6 @@ def Calculation(x):
 
     #加上一些flag，来控制之后是否运行新的case
     flag = 'None'
-    redo_flag = 'None'
 
     #在这儿定义目标值
     Mach_target  = 0.8 
@@ -407,7 +407,7 @@ def Calculation(x):
     W_ma    = 20.
     W_alpha = 40.
     W_mdot  = 100.
-    W_p0    = 40.
+    W_p0    = 20.
 
 
 
@@ -455,14 +455,41 @@ def Calculation(x):
     #        COST_FUNC = sum(Cost[i])   
 
     #找到最小的马式距离
+    #find the minimum md distance
     minimum_distance = min(distance_list)  
+    print "The mahala-nobis distance are :" , distance_list
+    min_index = distance_list.index(min(distance_list))
 
-   #如果马氏距离在0到0.05之间，使用概率方程进行evaluation 
-    if minimum_distance < 0.0005: 
+
+
+    if minimum_distance == 0.:
+        
+        COST_FUNC = (Cost[min_index][0])* W_ma + (Cost[min_index][1]) * W_alpha + (Cost[min_index][2])*W_mdot + (Cost[min_index][3])*W_p0      
+
+
+
+    elif minimum_distance < 1e-4:
+
+        # Use the neareast cost as the 
+
+        COST_FUNC = (Cost[min_index][0])* W_ma + (Cost[min_index][1]) * W_alpha + (Cost[min_index][2])*W_mdot + (Cost[min_index][3])*W_p0
+
+        # 写文件，算一步写一步
+        write = [GLOBAL_INDEX] + [0] + x.tolist() + Post[min_index] + Cost[min_index] + [GLOBAL_DIR] + ['i']
+        f = open("dataList_New",'a+')
+        f.write("%s" % write + '\r\n')
+        f.close()
+        GLOBAL_INDEX += 1
+        print COST_FUNC  
+
+
+    #如果马氏距离在0到0.05之间，使用概率方程进行evaluation 
+
+    elif  minimum_distance < 0.01: 
         
         print "minimum distance is:", minimum_distance
-        #这一步是让距离从0～0.005 整合为 0 ～0.1,以适应0～0.1的概率累计方程
-        a = minimum_distance  * 200. 
+        #这一步是让距离从0～0.01 整合为 0 ～0.1,以适应0～0.1的概率累计方程
+        a = minimum_distance  * 10. 
         
 
         # cumulative distrubution function
@@ -485,7 +512,8 @@ def Calculation(x):
 
 
 
-
+    # Then starting interpolation or evaluation
+    #接下来开始执行插值或者计算
 
     if 'interpolation' == flag:
             temp_Ma = []
@@ -521,8 +549,14 @@ def Calculation(x):
 
             #print "!!!!!Ma=", Ma_interpolate,Alpha_interpolate,Mdot_interpolate,P_interpolate
             Cost_list = []
-            Cost_list = COST_EVALUATION(Mach_target, alpha_target, mdot_target, p0_target, Ma_interpolate, Alpha_interpolate, Mdot_interpolate, P_interpolate)
+            Cost_list = COST_EVALUATION(Mach_target, alpha_target, mdot_target, p0_target, float(Ma_interpolate.tolist()[0]), float(Alpha_interpolate.tolist()[0]),float(Mdot_interpolate.tolist()[0]), float(P_interpolate.tolist()[0])  )
 
+
+            Post_list = []
+            Post_list.append(float(Ma_interpolate.tolist()[0]))
+            Post_list.append(float(Alpha_interpolate.tolist()[0]))
+            Post_list.append(float(Mdot_interpolate.tolist()[0]))
+            Post_list.append(float(P_interpolate.tolist()[0]))
             
       
 
@@ -533,21 +567,38 @@ def Calculation(x):
             if np.isnan( COST_FUNC ):
                 print "TRY to extrapolation!!!!!! rerun the case."
                 flag = 'evaluation'#'interpolation'
+
             else:
                 print "The total cost is:", COST_FUNC, " and cost is, Ma:", Cost_list[0], " alpha:", Cost_list[1] , " mdot:", Cost_list[2], " p0:", Cost_list[3]
-                GLOBAL_INDEX += 1
+
                 ITERATION.append(GLOBAL_INDEX)
                 RESIDUAL.append(COST_FUNC)
-           
 
+
+                write = [GLOBAL_INDEX] + [0] + x.tolist() + Post_list + Cost_list + [GLOBAL_DIR] + ['i']
+                print write
+
+                # 写文件，算一步写一步
+
+                f = open("dataList_New",'a+')
+                f.write("%s" % write + '\r\n')
+                f.close()
+                GLOBAL_INDEX += 1
+           
+                
 
     print "flag is :",flag
 
-    if ('evaluation' == flag):#  or ('evaluation' == redo_flag ):
+    if 'evaluation' == flag:#  or ('evaluation' == redo_flag ):
         print "flag:", flag
 
         # execute the simulation
-        EXECUTE(x.tolist(),GLOBAL_DIR)
+        # 执行计算
+
+        neareast_DIR = Directory[min_index]
+        print neareast_DIR, min_index
+
+        EXECUTE(x.tolist(),GLOBAL_DIR,neareast_DIR)
 
 
         print "Heading here for evaluation"
@@ -612,7 +663,7 @@ def Calculation(x):
         print("count = ", GLOBAL_COUNT)
 
 
-        write = [GLOBAL_INDEX] + [1] + x.tolist() + Post_list + Cost_list + [GLOBAL_DIR]
+        write = [GLOBAL_INDEX] + [0] + x.tolist() + Post_list + Cost_list + [GLOBAL_DIR] + ['e']
         print write
 
 
@@ -628,12 +679,14 @@ def Calculation(x):
         
         GLOBAL_INDEX += 1
 
-        ITERATION.append(GLOBAL_INDEX)
-        RESIDUAL.append(COST_FUNC)
+
 
     else:
         print " you use wrong entry for the flag"
         pass
+
+    ITERATION.append(GLOBAL_INDEX)
+    RESIDUAL.append(COST_FUNC)
 
     #print "The cost is:", COST_FUNC
     return COST_FUNC
@@ -669,7 +722,7 @@ if __name__ == "__main__":
     if initial_array_type == 'latest':
 
         #选取最新的12个尺寸列表，用来初始化optimiser
-        initial_array = np.array(Geometry[-12:])
+        initial_array = np.array(Geometry[:12])
         print initial_array
 
     else:
@@ -699,7 +752,8 @@ if __name__ == "__main__":
         # Goal of optimiser find x that results in min(fun(x))
 
 
-
+    print "ITERATION:", ITERATION
+    print "RESIDUAL",RESIDUAL
     # create the final figure for the optimisation progress
     plt.figure(figsize=(8,4))
     plt.grid()
