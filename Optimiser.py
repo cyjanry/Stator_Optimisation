@@ -60,6 +60,7 @@ def load_data():
     Post      = [] # List to store the results of post processing
     Cost      = [] # List to store the cost functions
     Directory = [] # List to store the case directory
+    Method    = [] # List to store the method for getting the data, interpolation or evaluation
 
     #[1, 1 , 0.1, 0.0, -0.1, 0.07, 0.0682, 0.0012, 0.002, 0.00008,  70., 0.2,  0.02,  nan, nan, nan, nan, nan, nan, nan, nan, folder address for simaultion ]
 
@@ -91,7 +92,9 @@ def load_data():
 
         #print DATA_LIST
 
-    return DATA_LIST, Index, Status, Geometry, Post, Cost, Directory 
+        Method.append(DATA_LIST[i][22])
+
+    return DATA_LIST, Index, Status, Geometry, Post, Cost, Directory, Method
 
 ##############################
 def EXECUTE(Geometry_list,Case_directory,neareast_DIR):
@@ -424,7 +427,7 @@ def Calculation(x):
     
 
     # 对比当前的尺寸値的已经有列表值，如果已经存在，那么就用已经存的值替代当前值
-    DATA_LIST, Index, Status, Geometry, Post, Cost, Directory  = load_data()
+    DATA_LIST, Index, Status, Geometry, Post, Cost, Directory, Method  = load_data()
 
 
     # The inverse of covariance matrix
@@ -441,24 +444,28 @@ def Calculation(x):
     for i in range(len(Geometry)):
         distance_list.append( COMPARE_VECTOR(x.tolist(),Geometry[i],COV_MATRIX.T) )#注意此处使用转置的斜方差矩阵
 
-
-
-
-
     #得到所有的马式距离之后，就要看是否有点落到相应的区间了
 
     print "After distance evaluation..."
 
-    #如果马氏距离小于1e-07，直接使用临近点的Cost，或者说100%的进行插值计算
-    #for j in range(len(distance_list)):
-    #    if distance_list[j] < 1e-7:
-    #        COST_FUNC = sum(Cost[i])   
 
     #找到最小的马式距离
     #find the minimum md distance
     minimum_distance = min(distance_list)  
     print "The mahala-nobis distance are :" , distance_list
     min_index = distance_list.index(min(distance_list))
+
+    #把distance_list进行排序，返回从小到大的变量的index
+    #Sort the distance_list, return an array of index
+    sorted_index_array = np.argsort(distance_list,kind='quicksort')
+    Geometry_New = []
+    for i in range(len(sorted_index_array)):
+        if i < 70:
+            Geometry_New.append(Geometry[sorted_index_array[i]])
+
+    #print "The 80 geometry for interpolation:", Geometry_New,len(Geometry_New)
+
+
 
 
 
@@ -468,7 +475,7 @@ def Calculation(x):
 
 
 
-    elif minimum_distance < 1e-4:
+    elif minimum_distance < 1e-6:
 
         # Use the neareast cost as the 
 
@@ -521,30 +528,42 @@ def Calculation(x):
             temp_Alpha = []
             temp_Mdot  = []
 
-            for i in range(len(Post)):
-                temp_Ma.append((Post[i][0]))
-                temp_Alpha.append((Post[i][1]))
-                temp_Mdot.append((Post[i][2]))
-                temp_P.append((Post[i][3]))
+            #for i in range(len(Post)):
+            #    temp_Ma.append((Post[i][0]))
+            #    temp_Alpha.append((Post[i][1]))
+            #    temp_Mdot.append((Post[i][2]))
+            #    temp_P.append((Post[i][3]))
             #print temp_Ma
 
-            #print Geometry
+            #sorted_index_array = np.argsort(distance_list,kind='quicksort')
 
-            points = np.array(Geometry)#; print points
+            #Geometry_fifty = []
+            # 将距离最小的50个值的 后处理值给定 
+            #
+            for i in range(len(sorted_index_array)):
+                if i < 70:
+                    #Geometry_fifty.append(Geometry[sorted_index_array[i]])
+                    temp_Ma.append( Post[sorted_index_array[i]][0]  )
+                    temp_Alpha.append(Post[sorted_index_array[i]][1]  )
+                    temp_Mdot.append( Post[sorted_index_array[i]][2])
+                    temp_P.append( Post[sorted_index_array[i]][3] )
 
-            value_Ma = np.array(temp_Ma)#; #print values
+                
+
+            value_Ma     = np.array(temp_Ma)#; #print values
             value_Alpha  = np.array(temp_Alpha)
-            value_Mdot = np.array(temp_Mdot)
-            value_P    = np.array(temp_P)
+            value_Mdot   = np.array(temp_Mdot)
+            value_P      = np.array(temp_P)
 
             xi  = x
             #print xi.shape
 
-
-            Ma_interpolate    = griddata(Geometry, value_Ma, xi, method='linear',rescale=True)
-            Alpha_interpolate = griddata(Geometry,value_Alpha,xi, method='linear',rescale=True)
-            Mdot_interpolate  = griddata(Geometry,value_Mdot,xi,method='linear',rescale=True )
-            P_interpolate     = griddata(Geometry,value_P,xi, method='linear',rescale=True)
+            #print "The geometry is:", Geometry, len(Geometry)
+            #1/0
+            Ma_interpolate    = griddata(Geometry_New, value_Ma,    xi, method='linear',rescale=True)
+            Alpha_interpolate = griddata(Geometry_New, value_Alpha, xi, method='linear',rescale=True)
+            Mdot_interpolate  = griddata(Geometry_New, value_Mdot,  xi, method='linear',rescale=True )
+            P_interpolate     = griddata(Geometry_New, value_P,     xi, method='linear',rescale=True)
 
 
             #print "!!!!!Ma=", Ma_interpolate,Alpha_interpolate,Mdot_interpolate,P_interpolate
@@ -595,8 +614,21 @@ def Calculation(x):
         # execute the simulation
         # 执行计算
 
-        neareast_DIR = Directory[min_index]
-        print neareast_DIR, min_index
+
+        #找到最近的evaluation 的路径
+        # Find the neareast distance directory
+
+
+        #sorted_index_array = np.argsort(distance_list,kind='quicksort')
+        for i in range(len(sorted_index_array)):
+            if Method[sorted_index_array[i]] == 'e':
+                min_evaluation_index = sorted_index_array[i] 
+                break
+
+
+        neareast_DIR = Directory[min_evaluation_index]
+        print neareast_DIR, min_evaluation_index
+        
 
         EXECUTE(x.tolist(),GLOBAL_DIR,neareast_DIR)
 
@@ -704,7 +736,7 @@ if __name__ == "__main__":
 
     #ROOT_DIR  = "/media/uqjqi/Janry_Research/Stator_Optimization"
 
-    DATA_LIST, Index, Status, Geometry, Post, Cost, Directory  = load_data()
+    DATA_LIST, Index, Status, Geometry, Post, Cost, Directory, Method  = load_data()
 
 
     # Find the starting point, and give it an index
